@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PRF Generator</title>
+<meta name="description" content="Builds a Payment Request Form (PRF) from an SOA PDF, a charging-code file and the PRF template. Runs entirely in your browser.">
+<style>
+:root{
+  --bg:#f6f5f2; --surface:#ffffff; --ink:#1d1d1b; --muted:#6a6a64; --line:#dcdad3;
+  --accent:#e8620c; --accent-ink:#ffffff; --accent-soft:#fdeee3;
+  --ok:#1f7a45; --ok-soft:#e5f3ea; --warn:#9a5b00; --warn-soft:#fff2d9; --err:#b3261e; --err-soft:#fbe5e3;
+  --info:#27506f; --info-soft:#e4eef6; --stripe:#faf9f6; --radius:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#161614; --surface:#201f1d; --ink:#efede8; --muted:#a09d94; --line:#3a3935;
+    --accent:#f0793a; --accent-ink:#1a1209; --accent-soft:#3a2415;
+    --ok:#62c48a; --ok-soft:#173222; --warn:#e8b25a; --warn-soft:#38290f; --err:#f2877f; --err-soft:#3e1b18;
+    --info:#8fbfe3; --info-soft:#18293a; --stripe:#242321;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161614; --surface:#201f1d; --ink:#efede8; --muted:#a09d94; --line:#3a3935;
+  --accent:#f0793a; --accent-ink:#1a1209; --accent-soft:#3a2415;
+  --ok:#62c48a; --ok-soft:#173222; --warn:#e8b25a; --warn-soft:#38290f; --err:#f2877f; --err-soft:#3e1b18;
+  --info:#8fbfe3; --info-soft:#18293a; --stripe:#242321;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.wrap{max-width:1240px;margin:0 auto;padding:28px 16px 64px}
+header.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:22px}
+h1{font-size:26px;line-height:1.2;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0;max-width:62ch}
+.theme{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px;cursor:pointer}
+.theme:hover{color:var(--ink);border-color:var(--muted)}
+section.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-bottom:18px}
+h2{font-size:16px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+h2 .n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-size:13px;font-weight:700}
+.hint{color:var(--muted);font-size:13px;margin:0 0 14px}
+.drops{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.drop{position:relative;border:1.5px dashed var(--line);border-radius:var(--radius);padding:16px 14px;cursor:pointer;display:block;transition:border-color .15s,background .15s;min-height:112px}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.drop .t{font-weight:650;display:block;margin-bottom:2px}
+.drop .d{font-size:13px;color:var(--muted);display:block}
+.drop .f{display:block;margin-top:8px;font-size:13px;word-break:break-all}
+.drop.has{border-style:solid;border-color:var(--ok);background:var(--ok-soft)}
+.drop.has .f{color:var(--ok);font-weight:600}
+.drop.busy{border-color:var(--info);background:var(--info-soft)}
+.drop.bad{border-color:var(--err);background:var(--err-soft)}
+.drop.bad .f{color:var(--err);font-weight:600}
+.opt{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.status{margin-top:12px;font-size:13px;color:var(--muted);min-height:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px 16px}
+label.fld{display:block;font-size:12px;font-weight:600;color:var(--muted)}
+label.fld input[type=text],label.fld input[type=date]{display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:14px}
+label.fld input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.wide{grid-column:span 2}
+details{margin-top:14px}
+summary{cursor:pointer;font-weight:600;font-size:14px}
+table.rules{border-collapse:collapse;margin-top:10px;font-size:13px}
+table.rules th,table.rules td{border:1px solid var(--line);padding:4px 8px;text-align:left}
+table.rules th{background:var(--stripe);font-weight:600}
+table.rules input{width:96px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
+.checks{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:14px}
+.checks label{display:flex;gap:8px;align-items:center;cursor:pointer}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.tile{border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;background:var(--bg)}
+.tile .k{font-size:12px;color:var(--muted);font-weight:600}
+.tile .v{font-size:22px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.tile .s{font-size:12px;color:var(--muted)}
+.tile.ok{border-color:var(--ok);background:var(--ok-soft)} .tile.ok .v{color:var(--ok)}
+.tile.bad{border-color:var(--err);background:var(--err-soft)} .tile.bad .v{color:var(--err)}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+button.btn{font:inherit;font-weight:650;font-size:14px;border-radius:8px;padding:10px 16px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+button.btn:hover{border-color:var(--muted)}
+button.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button.btn.primary:hover{filter:brightness(1.06)}
+button.btn:disabled{opacity:.5;cursor:not-allowed}
+.notes{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:6px}
+.notes li{display:flex;gap:10px;align-items:flex-start;border-radius:8px;padding:8px 12px;font-size:13.5px}
+.notes .tag{flex:none;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:5px;margin-top:1px}
+.notes .error{background:var(--err-soft)} .notes .error .tag{background:var(--err);color:#fff}
+.notes .warn{background:var(--warn-soft)} .notes .warn .tag{background:var(--warn);color:#fff}
+.notes .info{background:var(--info-soft)} .notes .info .tag{background:var(--info);color:#fff}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .notes .tag{color:#111}}
+:root[data-theme="dark"] .notes .tag{color:#111}
+.scroll{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:8px}
+table.prf{border-collapse:separate;border-spacing:0;font-size:12.5px;width:100%;min-width:1100px}
+table.prf th{position:sticky;top:0;background:#ffcc00;color:#222;text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap;z-index:1}
+table.prf td{padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+table.prf td.num{text-align:right}
+table.prf td.desc{white-space:normal;min-width:340px;max-width:460px}
+table.prf tr.alt td{background:var(--stripe)}
+table.prf tr.zero td{color:var(--muted)}
+table.prf tr.nomatch td{background:var(--err-soft)}
+table.prf tr.first td{border-top:2px solid var(--line)}
+table.prf tfoot td{font-weight:700;background:#ffff00;color:#222;position:sticky;bottom:0}
+footer{color:var(--muted);font-size:12.5px;margin-top:26px}
+.hidden{display:none}
+@media (max-width:820px){
+  .drops{grid-template-columns:1fr}
+  .tiles{grid-template-columns:1fr 1fr}
+  .wide{grid-column:span 1}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Payment Request Form (PRF) Generator</h1>
+      <p class="sub">Upload the SOA, the charging-code file and the PRF template. The PRF lines (account codes, T0–T9, purpose) are built for you and downloaded as an Excel file. Everything runs in your browser. No file is uploaded anywhere.</p>
+    </div>
+    <button class="theme" id="themeBtn" type="button" aria-label="Toggle light or dark theme">Theme</button>
+  </header>
+
+  <section class="card" id="filesCard">
+    <h2><span class="n">1</span> Upload the three files</h2>
+    <p class="hint">Click a box or drag files onto it. You can also drop all three files on any box at once and they will be sorted automatically.</p>
+    <div class="drops">
+      <label class="drop" id="dz-soa" data-kind="soa">
+        <input type="file" multiple accept=".pdf,.xls,.xlsx,.xlsm,.csv,application/pdf">
+        <span class="t">SOA (PDF)</span>
+        <span class="d">The statement of account. This is the base of the PRF.</span>
+        <span class="f" id="fn-soa">No file yet</span>
+      </label>
+      <label class="drop" id="dz-chg" data-kind="chg">
+        <input type="file" multiple accept=".pdf,.xls,.xlsx,.xlsm,.csv,application/pdf">
+        <span class="t">Charging code file (Excel)</span>
+        <span class="d">Account code, T0–T9, purpose and VR number per trip.</span>
+        <span class="f" id="fn-chg">No file yet</span>
+      </label>
+      <label class="drop" id="dz-tpl" data-kind="tpl">
+        <input type="file" multiple accept=".pdf,.xls,.xlsx,.xlsm,.csv,application/pdf">
+        <span class="t">PRF template (Excel) <span class="opt">recommended</span></span>
+        <span class="d">Supplies the header defaults and the expense-to-code rules. Large files take a few seconds.</span>
+        <span class="f" id="fn-tpl">No file yet</span>
+      </label>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="card hidden" id="formCard">
+    <h2><span class="n">2</span> Check the header details</h2>
+    <p class="hint">These were read from the files. Change anything that needs it and the PRF below updates.</p>
+    <div class="grid">
+      <label class="fld">Pay to<input type="text" id="f-payTo"></label>
+      <label class="fld wide">For / description<input type="text" id="f-desc"></label>
+      <label class="fld">SOA number<input type="text" id="f-soa"></label>
+      <label class="fld">Reference (PPH)<input type="text" id="f-ref"></label>
+      <label class="fld">Split billing T1<input type="text" id="f-t1"></label>
+      <label class="fld">Split billing T0<input type="text" id="f-t0"></label>
+      <label class="fld">Printing location<input type="text" id="f-pl"></label>
+      <label class="fld">Printing location flag<input type="text" id="f-plf"></label>
+      <label class="fld">Prepared by<input type="text" id="f-prep"></label>
+      <label class="fld">Checked by<input type="text" id="f-chk"></label>
+      <label class="fld">Checked date<input type="text" id="f-chkd" placeholder="m/d/yyyy"></label>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" id="o-zero" checked> Keep lines with a zero amount (the template does)</label>
+    </div>
+    <details>
+      <summary>Expense coding rules (from the template's INVOICE sheet)</summary>
+      <table class="rules" id="rulesTbl"></table>
+      <p class="hint" style="margin-top:8px">Cost centres (numeric account code) use the account code shown and T2 = #. Projects (code starting with a letter) keep their project code and use the T2 shown. For Basic Charge and Overtime the project T2 from the charging file is used when it is a valid 8xxxx code.</p>
+    </details>
+  </section>
+
+  <section class="card hidden" id="outCard">
+    <h2><span class="n">3</span> PRF output</h2>
+    <p class="hint" id="outHint"></p>
+    <div class="tiles" id="tiles"></div>
+    <div class="actions">
+      <button class="btn primary" id="dlBtn" type="button">Download PRF (.xlsx)</button>
+      <button class="btn" id="copyBtn" type="button">Copy table for pasting</button>
+      <button class="btn" id="csvBtn" type="button">Download CSV</button>
+    </div>
+    <ul class="notes" id="notes"></ul>
+    <div class="scroll"><table class="prf" id="prfTbl"></table></div>
+  </section>
+
+  <footer>Built for the WVDF vehicle-rental PRF. Libraries load from cdnjs (pdf.js, SheetJS, ExcelJS). Upload this one file to GitHub and switch on GitHub Pages.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>
+(function(){
+'use strict';
+
+/* ---------- constants ---------- */
+var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+var EXPENSES = [
+  {label:'Basic Charge', soa:'basic', core:true},
+  {label:'Overtime',     soa:'ot',    core:true},
+  {label:'Meals',        soa:'meals'},
+  {label:'Toll Fee',     soa:'toll'},
+  {label:'Parking',      soa:'parking'},
+  {label:'Fuel',         soa:'fuel',  desig:true}
+];
+var DEFAULT_RULES = {
+  'Basic Charge': {cc:'52105', t2:'82105', t5:'RPV'},
+  'Overtime':     {cc:'52105', t2:'82105', t5:'RPV'},
+  'Meals':        {cc:'56001', t2:'86001', t5:'#'},
+  'Toll Fee':     {cc:'52099', t2:'82099', t5:'#'},
+  'Parking':      {cc:'52099', t2:'82099', t5:'#'},
+  'Fuel':         {cc:'52101', t2:'82101', t5:'RPV'}
+};
+var VALID_DESIG = ['RPV','RCV'];
+var REF_TABLE = [
+  ['VEHICLE RENTAL (BASIC CHARGE + OVERTIME)',52201,82201],
+  ['GAS/FUEL',52101,82101],
+  ['MEALS',56001,86001],
+  ['TOLL',52099,82099],
+  ['PARKING FEE',52099,82099]
+];
+var INSTRUCTIONS = [
+  'Choose if the transaction is Split Billing or Non-PO Backed Invoices. If Split Billing, select the correct Split Billing T1 and T0 Code',
+  'Fill in cost center and coding combinations data on the second table. Transaction codes combination required are given in the first table. ',
+  'You may refer to the Databases sheet for the coding names.',
+  'If it is for Non-PR Backed Invoices, please insert the Invoice copy as Object in the third sheet.'
+];
+var SAMPLES = [
+  ['Project','P197015'],['Support (N/S Series)',51001],['NRD (R Series)',51001],['Cluster Cost',51001],['GN','R0005HKG']
+];
+
+/* ---------- state ---------- */
+var S = {
+  files:{soa:null,chg:null,tpl:null},
+  soa:null, chg:null, tpl:null,
+  form:{}, rules:JSON.parse(JSON.stringify(DEFAULT_RULES)),
+  result:null, tplNote:''
+};
+
+/* ---------- helpers ---------- */
+function $(id){return document.getElementById(id)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function norm(x){return String(x==null?'':x).trim().toUpperCase()}
+function r2(n){return Math.round((n+Number.EPSILON)*100)/100}
+function money(n){return Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function toNum(s){var n=parseFloat(String(s).replace(/,/g,''));return isNaN(n)?0:n}
+function pad(n){return n<10?'0'+n:''+n}
+function isoFromParts(y,m,d){return y+'-'+pad(m)+'-'+pad(d)}
+function parseSoaDate(s){
+  var m=/^([A-Za-z]{3})\w*\s+(\d{1,2}),\s*(\d{4})$/.exec(String(s).trim());
+  if(!m) return null;
+  var mi=MONTHS.findIndex(function(x){return x.toLowerCase()===m[1].toLowerCase()});
+  if(mi<0) return null;
+  return isoFromParts(+m[3],mi+1,+m[2]);
+}
+function isoToDateUTC(iso){var p=iso.split('-');return new Date(Date.UTC(+p[0],+p[1]-1,+p[2]))}
+function isoToUS(iso){var p=iso.split('-');return (+p[1])+'/'+(+p[2])+'/'+p[0]}
+function todayUS(){var d=new Date();return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear()}
+function cellDateToISO(v){
+  if(v==null||v==='') return '';
+  if(v instanceof Date){return isoFromParts(v.getFullYear(),v.getMonth()+1,v.getDate())}
+  if(typeof v==='number'){var p=XLSX.SSF.parse_date_code(v);return p?isoFromParts(p.y,p.m,p.d):''}
+  var m=/(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(v));
+  if(m) return isoFromParts(+m[1],+m[2],+m[3]);
+  m=/(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(v));
+  if(m) return isoFromParts(+m[3],+m[1],+m[2]);
+  return '';
+}
+function tval(v){ // T-code cell: empty -> '#', numeric strings stay as typed
+  if(v==null||String(v).trim()==='') return '#';
+  if(typeof v==='number') return v;
+  return String(v).trim();
+}
+function codeOut(v){ // account code -> number if purely digits (the template stores them that way)
+  var s=String(v).trim();
+  return /^\d+$/.test(s)?Number(s):s;
+}
+function status(msg,cls){var el=$('status');el.textContent=msg||'';el.style.color=cls==='err'?'var(--err)':'var(--muted)'}
+
+/* ---------- SOA PDF ---------- */
+async function parseSOA(buf){
+  if(!window.pdfjsLib) throw new Error('The PDF reader library did not load. Check your internet connection and reload.');
+  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  var pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf)}).promise;
+  var rowsAll=[];
+  for(var p=1;p<=pdf.numPages;p++){
+    var page=await pdf.getPage(p);
+    var tc=await page.getTextContent();
+    var rows=[];
+    tc.items.forEach(function(it){
+      var s=(it.str||'').trim(); if(!s) return;
+      var x=it.transform[4], y=it.transform[5];
+      var r=rows.find(function(r){return Math.abs(r.y-y)<=2.5});
+      if(!r){r={y:y,items:[]};rows.push(r)}
+      r.items.push({x:x,s:s});
+    });
+    rows.sort(function(a,b){return b.y-a.y});
+    rows.forEach(function(r){r.items.sort(function(a,b){return a.x-b.x});r.text=r.items.map(function(i){return i.s}).join(' ');rowsAll.push(r)});
+  }
+  var DATE_RE=/^[A-Za-z]{3}\w*\s+\d{1,2},\s*\d{4}$/;
+  var meta={period:'',periodEnd:'',vendor:'',soaNo:'',grandTotal:null};
+  var lines=[], problems=[];
+  rowsAll.forEach(function(r){
+    var t=r.text, m;
+    if((m=/Date Covered:\s*([A-Za-z]{3}\w*\s+\d{1,2},\s*\d{4})\s*to\s*([A-Za-z]{3}\w*\s+\d{1,2},\s*\d{4})/.exec(t))){meta.period=m[1]+' to '+m[2];meta.periodEnd=parseSoaDate(m[2])||''}
+    if(!meta.soaNo && (m=/SOA#\s*([\w.\-\/]+)/.exec(t))) meta.soaNo=m[1];
+    if(!meta.vendor && /^(Outsource|Outsourced)\s*-\s*/i.test(t)){
+      var parts=t.split(/\s+-\s+/); if(parts.length>=2) meta.vendor=parts[1].trim();
+    }
+    if(/^Grand Total/i.test(t)){var g=/([\d,]+\.\d{2})\s*$/.exec(t);if(g) meta.grandTotal=toNum(g[1])}
+    if(!/^VR-\d{4}-\d+$/.test(r.items[0].s)) return;
+    var items=r.items, di=items.findIndex(function(i){return DATE_RE.test(i.s)});
+    if(di<0){problems.push('Could not find the trip date on SOA row '+items[0].s);return}
+    var rest=items.slice(di+1).map(function(i){return i.s}), k=0;
+    var acct=rest[k++], dept='#';
+    if(!/^\d+(\.\d+)?%$/.test(rest[k]||'')) dept=rest[k++];
+    var pct=parseFloat(rest[k++]);
+    var nums=rest.slice(k).map(toNum);
+    if(nums.length!==9){problems.push('SOA row '+items[0].s+' has '+nums.length+' number columns (expected 9). Please check it.');return}
+    lines.push({
+      vr:items[0].s, plate:items[1]?items[1].s:'', origin:items[2]?items[2].s:'',
+      dest:items.slice(3,di).map(function(i){return i.s}).join(' '),
+      dateISO:parseSoaDate(items[di].s)||'', dateTxt:items[di].s,
+      acct:acct, dept:dept, pct:pct, km:nums[0],
+      basic:nums[1], fuel:nums[2], meals:nums[3], toll:nums[4], parking:nums[5], ot:nums[6], others:nums[7], total:nums[8]
+    });
+  });
+  if(!lines.length) throw new Error('No trip rows were found in the SOA PDF. Is this the right file?');
+  return {meta:meta, lines:lines, problems:problems};
+}
+
+/* ---------- charging file ---------- */
+function parseCharging(buf){
+  var wb=XLSX.read(buf,{type:'array'});
+  var ws=wb.Sheets[wb.SheetNames[0]];
+  var rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:true});
+  if(rows.length<2) throw new Error('The charging code file looks empty.');
+  var head=rows[0].map(function(h){return norm(h)});
+  function col(names){for(var i=0;i<names.length;i++){var ix=head.indexOf(names[i]);if(ix>=0)return ix}return -1}
+  var c={pct:col(['%']),acct:col(['ACCOUNT CODE']),vr:col(['VR NUMBER','VR #','VR']),purpose:col(['PURPOSE']),
+         out:col(['DATE & TIME OUT','DATE OUT','DATE']),src:col(['SOURCE TYPE']),vrType:col(['VR TYPE']),status:col(['STATUS'])};
+  var t=[];
+  for(var i=0;i<10;i++){t.push(col(['T'+i]))}
+  var need=[['%',c.pct],['Account Code',c.acct],['VR Number',c.vr],['Purpose',c.purpose]];
+  t.forEach(function(ix,i){need.push(['T'+i,ix])});
+  var missing=need.filter(function(n){return n[1]<0}).map(function(n){return n[0]});
+  if(missing.length) throw new Error('The charging code file is missing these columns: '+missing.join(', '));
+  var out=[];
+  for(var r=1;r<rows.length;r++){
+    var row=rows[r];
+    if(!row||row[c.vr]==null||String(row[c.vr]).trim()==='') continue;
+    out.push({
+      pct:toNum(row[c.pct]), acct:String(row[c.acct]==null?'':row[c.acct]).trim(),
+      vr:String(row[c.vr]).trim(), purpose:String(row[c.purpose]==null?'':row[c.purpose]).replace(/\s+/g,' ').trim(),
+      date:c.out>=0?cellDateToISO(row[c.out]):'',
+      t:t.map(function(ix){return tval(row[ix])})
+    });
+  }
+  if(!out.length) throw new Error('No VR rows were found in the charging code file.');
+  return {rows:out};
+}
+
+/* ---------- template ---------- */
+function parseTemplate(buf){
+  var out={rules:null,header:{},note:''};
+  var names=XLSX.read(buf,{type:'array',bookSheets:true}).SheetNames;
+  var prfName=names.slice().reverse().find(function(n){return /^PRF/i.test(n)})||null;
+  var invName=names.find(function(n){return /^INVOICE$/i.test(n)})||null;
+  var want=[prfName,invName].filter(Boolean);
+  if(!want.length){out.note='No "PRF" or "INVOICE" sheet was found in the template, so the built-in defaults were used.';return out}
+  var wb=XLSX.read(buf,{type:'array',sheets:want,cellStyles:false,cellFormula:false});
+  function cv(ws,a){var c=ws&&ws[a];return c?c.v:null}
+  if(prfName&&wb.Sheets[prfName]){
+    var ws=wb.Sheets[prfName], h=out.header;
+    h.payTo=cv(ws,'B3'); h.desc=cv(ws,'B5'); h.ref=cv(ws,'B6');
+    h.t1=cv(ws,'L4'); h.t0=cv(ws,'L5'); h.pl=cv(ws,'M1'); h.plf=cv(ws,'N1');
+    var chk=cv(ws,'B22');
+    if(chk){var m=/Checked by\s*\/\s*Date:\s*(.*?)\s*(\d{1,2}\/\d{1,2}\/\d{4})?\s*$/i.exec(String(chk)); if(m) h.chk=m[1]}
+  }
+  if(invName&&wb.Sheets[invName]){
+    var rows=XLSX.utils.sheet_to_json(wb.Sheets[invName],{header:1,defval:null});
+    var rules={};
+    rows.forEach(function(row){
+      for(var i=0;i<row.length;i++){
+        var lab=row[i]==null?'':String(row[i]).trim();
+        var e=EXPENSES.find(function(x){return x.label.toLowerCase()===lab.toLowerCase()});
+        if(!e) continue;
+        var acct=row[i+1], t2=row[i+2], t5=row[i+3];
+        if(!rules[e.label]) rules[e.label]={};
+        if(/^P/i.test(String(acct))){ // project rows hold PXXXXXX + T2
+          rules[e.label].t2=String(t2).trim();
+        } else {
+          rules[e.label].cc=String(acct).trim();
+          rules[e.label].t5=tval(t5);
+        }
+        break;
+      }
+    });
+    var ok=EXPENSES.every(function(e){return rules[e.label]&&rules[e.label].cc&&rules[e.label].t2});
+    if(ok) out.rules=rules; else out.note='The INVOICE sheet could not be read completely, so the built-in coding rules were used.';
+  } else if(!out.note) out.note='No INVOICE sheet in the template, so the built-in coding rules were used.';
+  return out;
+}
+
+/* ---------- build the PRF lines ---------- */
+function buildPRF(){
+  var soa=S.soa, chg=S.chg, F=S.form, R=S.rules;
+  var notes=[], rows=[];
+  (soa.problems||[]).forEach(function(p){notes.push({lvl:'error',msg:p})});
+  var idx={};
+  chg.rows.forEach(function(r){var k=norm(r.vr)+'|'+norm(r.acct);(idx[k]=idx[k]||[]).push(r)});
+  var vrCodes={};
+  chg.rows.forEach(function(r){var k=norm(r.vr);(vrCodes[k]=vrCodes[k]||{})[r.acct]=1});
+  var splitCount=0, t5Fix={}, t2Fixed={}, t0Blank={}, ccNoT1={};
+
+  soa.lines.forEach(function(ln,li){
+    var cands=idx[norm(ln.vr)+'|'+norm(ln.acct)]||[];
+    var refLabel=ln.vr+' ('+ln.acct+', '+ln.dateTxt+')';
+    var matched=true, shares;
+    if(!cands.length){
+      matched=false;
+      var have=vrCodes[norm(ln.vr)];
+      notes.push({lvl:'error',msg:refLabel+': no row in the charging file for this VR and account code.'+(have?' The file has this VR under: '+Object.keys(have).join(', ')+'.':' The VR number is not in the file at all.')});
+      shares=[{pct:ln.pct,purpose:'',t:null,w:1}];
+    } else {
+      var c=cands, byDate=c.filter(function(r){return r.date===ln.dateISO});
+      if(byDate.length) c=byDate;
+      else notes.push({lvl:'warn',msg:refLabel+': no charging row has the trip date, so the VR and account code match was used.'});
+      if(ln.dept&&ln.dept!=='#'){var d=c.filter(function(r){return norm(r.t[1])===norm(ln.dept)});if(d.length) c=d}
+      var seen={}, uniq=[];
+      c.forEach(function(r){var k=r.pct+'|'+r.t.join('~');if(!seen[k]){seen[k]=1;uniq.push(r)}});
+      var sum=uniq.reduce(function(a,r){return a+r.pct},0);
+      shares=uniq.map(function(r){return {pct:r.pct,purpose:r.purpose,t:r.t,w:sum>0?r.pct/sum:1/uniq.length}});
+      if(uniq.length>1){
+        splitCount++;
+        notes.push({lvl:'info',msg:refLabel+': the SOA shows one line at '+ln.pct+'%, but the charging file splits it into '+uniq.length+' coding lines ('+uniq.map(function(r){return r.pct+'%'}).join(' + ')+'). The amounts were split in the same proportion.'});
+      }
+      if(Math.abs(sum-ln.pct)>0.01){
+        notes.push({lvl:'warn',msg:refLabel+': the SOA says '+ln.pct+'% but the charging file says '+sum+'%. The SOA amounts were used as they are.'});
+      }
+    }
+    if(r2(ln.basic+ln.fuel+ln.meals+ln.toll+ln.parking+ln.ot+ln.others-ln.total)!==0){
+      notes.push({lvl:'warn',msg:refLabel+': the SOA line total ('+money(ln.total)+') does not equal the sum of its columns ('+money(ln.basic+ln.fuel+ln.meals+ln.toll+ln.parking+ln.ot+ln.others)+').'});
+    }
+    if(ln.others>0){
+      notes.push({lvl:'warn',msg:refLabel+': the SOA has "Others" = '+money(ln.others)+'. The PRF template has no line for it, so it is not in the output. Add it by hand.'});
+    }
+    // distribute each expense across the shares, last share takes the rounding remainder
+    var parts=shares.map(function(){return {}});
+    EXPENSES.forEach(function(e){
+      var total=r2(ln[e.soa]), run=0;
+      shares.forEach(function(sh,i){
+        var v=(i===shares.length-1)?r2(total-run):r2(total*sh.w);
+        run=r2(run+v); parts[i][e.label]=v;
+      });
+    });
+    shares.forEach(function(sh,si){
+      var isProj=/^[A-Za-z]/.test(ln.acct);
+      if(sh.t){
+        if(String(sh.t[0])==='#') t0Blank[ln.vr]=1;
+        if(!isProj&&String(sh.t[1])==='#') ccNoT1[ln.vr]=1;
+      }
+      EXPENSES.forEach(function(e){
+        var amt=parts[si][e.label];
+        if(!S.form.keepZero && amt===0) return;
+        var rule=R[e.label], t=sh.t?sh.t.slice():null, acct, t2, t5, flag='';
+        if(!t){acct=codeOut(ln.acct);t=['','','','','','','','','',''];t2='';t5='';flag='nomatch'}
+        else{
+          if(isProj){
+            acct=codeOut(ln.acct);
+            var ct2=String(t[2]);
+            t2=(e.core&&/^8\d{4}$/.test(ct2))?Number(ct2):codeOut(rule.t2);
+          } else {
+            acct=e.core?codeOut(ln.acct):codeOut(rule.cc);
+            if(String(t[2])!=='#') t2Fixed[ln.vr]=1;
+            t2='#';
+          }
+          if(e.desig||e.core){
+            if(VALID_DESIG.indexOf(String(t[5]).toUpperCase())>=0) t5=String(t[5]).toUpperCase();
+            else{t5=rule.t5;if(String(t[5])!==String(rule.t5)) t5Fix[ln.vr]=1}
+          } else t5=rule.t5;
+        }
+        rows.push({
+          line:li, grp:li+'-'+si, pct:sh.pct, acct:acct,
+          soa:F.soa, vr:ln.vr, purpose:sh.purpose, dateISO:ln.dateISO, exp:e.label, amt:amt, flag:flag,
+          t:[t[0],t[1],t2,t[3],t[4],t5,t[6],t[7],t[8],t[9]]
+        });
+      });
+    });
+  });
+  // mark the first row of each SOA line / split for striping
+  var prev=null,stripe=0;
+  rows.forEach(function(r){if(r.grp!==prev){r.first=true;stripe++;prev=r.grp}else r.first=false;r.stripe=stripe%2});
+  var keys=Object.keys;
+  if(keys(t0Blank).length) notes.push({lvl:'warn',msg:'T0 (location) is "#" in the charging file for: '+keys(t0Blank).join(', ')+'. Lines normally carry a location letter such as A, D or H. Please confirm the coding.'});
+  if(keys(ccNoT1).length) notes.push({lvl:'warn',msg:'Cost-centre line(s) with T1 = "#" in the charging file: '+keys(ccNoT1).join(', ')+'. A cost centre normally needs a department code in T1 (for example R4418). Please confirm the coding.'});
+  if(keys(t2Fixed).length) notes.push({lvl:'info',msg:'T2 was set to "#" for cost-centre line(s) of '+keys(t2Fixed).join(', ')+' because the charging file had a T2 value there. Cost centres must have "#" on T2.'});
+  if(keys(t5Fix).length) notes.push({lvl:'info',msg:'T5 (designation) on Basic Charge, Overtime and Fuel lines was set to the template value (RPV) for '+keys(t5Fix).join(', ')+', because the charging file had no valid designation (RPV or RCV) there.'});
+  if(!soa.meta.grandTotal) notes.push({lvl:'warn',msg:'The SOA grand total could not be read, so the total check was skipped.'});
+  var total=r2(rows.reduce(function(a,r){return a+r.amt},0));
+  var soaLinesTotal=r2(soa.lines.reduce(function(a,l){return a+l.basic+l.fuel+l.meals+l.toll+l.parking+l.ot},0));
+  var ref=soa.meta.grandTotal!=null?soa.meta.grandTotal:soaLinesTotal;
+  var diff=r2(total-ref);
+  if(diff!==0){
+    var othersTotal=r2(soa.lines.reduce(function(a,l){return a+l.others},0));
+    notes.unshift({lvl:'error',msg:'The PRF total ('+money(total)+') is different from the SOA grand total ('+money(ref)+') by '+money(diff)+(othersTotal? '. "Others" on the SOA adds up to '+money(othersTotal)+'.':'.')});
+  }
+  var order={error:0,warn:1,info:2};
+  notes.sort(function(a,b){return order[a.lvl]-order[b.lvl]});
+  return {rows:rows,notes:notes,total:total,ref:ref,diff:diff,splitCount:splitCount};
+}
+
+/* ---------- render ---------- */
+function render(){
+  var res=S.result=buildPRF();
+  var bad=res.diff!==0, soa=S.soa;
+  $('outHint').textContent='Built from '+soa.lines.length+' SOA lines'+(soa.meta.period?' covering '+soa.meta.period:'')+'. Review the notes, then download.';
+  var errs=res.notes.filter(function(n){return n.lvl==='error'}).length;
+  $('tiles').innerHTML=
+    tile('SOA lines',soa.lines.length,'trip rows read from the PDF')+
+    tile('PRF lines',res.rows.length,res.splitCount?res.splitCount+' SOA line(s) split by %':'one block of 6 expense lines per trip')+
+    tile('PRF total',money(res.total),'transaction amount, PHP')+
+    '<div class="tile '+(bad?'bad':'ok')+'"><div class="k">Check against SOA</div><div class="v">'+(bad?'Off by '+money(Math.abs(res.diff)):'Matches')+'</div><div class="s">SOA grand total '+money(res.ref)+'</div></div>';
+  $('notes').innerHTML=res.notes.length?res.notes.map(function(n){
+    return '<li class="'+n.lvl+'"><span class="tag">'+({error:'Check',warn:'Warning',info:'Note'}[n.lvl])+'</span><span>'+esc(n.msg)+'</span></li>';
+  }).join(''):'<li class="info"><span class="tag">Note</span><span>No issues found.</span></li>';
+  var h='<thead><tr><th>%</th><th>Account</th><th>Description</th><th>SOA</th><th>VR</th><th>Purpose</th><th>Date</th><th>Exp</th><th>Amount</th>';
+  for(var i=0;i<10;i++) h+='<th>T'+i+'</th>';
+  h+='</tr></thead><tbody>';
+  res.rows.forEach(function(r){
+    var cls=(r.stripe?'alt ':'')+(r.amt===0?'zero ':'')+(r.flag?'nomatch ':'')+(r.first?'first':'');
+    h+='<tr class="'+cls+'"><td>'+r.pct+'</td><td>'+esc(r.acct)+'</td><td class="desc">'+esc(descOf(r))+'</td><td>'+esc(r.soa)+'</td><td>'+esc(r.vr)+'</td><td>'+esc(r.purpose)+'</td><td>'+(r.dateISO?isoToUS(r.dateISO):'')+'</td><td>'+esc(r.exp)+'</td><td class="num">'+money(r.amt)+'</td>';
+    r.t.forEach(function(v){h+='<td>'+esc(v)+'</td>'});
+    h+='</tr>';
+  });
+  h+='</tbody><tfoot><tr><td colspan="8">Total</td><td class="num">'+money(res.total)+'</td><td colspan="10"></td></tr></tfoot>';
+  $('prfTbl').innerHTML=h;
+  $('outCard').classList.remove('hidden');
+}
+function tile(k,v,s){return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div><div class="s">'+esc(s)+'</div></div>'}
+function descOf(r){return [r.soa,r.vr,r.purpose,r.exp].join(' ')}
+
+/* ---------- excel output ---------- */
+async function buildWorkbook(){
+  var res=S.result, F=S.form;
+  if(!window.ExcelJS) throw new Error('The Excel library did not load. Check your internet connection and reload.');
+  var wb=new ExcelJS.Workbook();
+  wb.creator='PRF Generator';
+  var ws=wb.addWorksheet('PRF',{views:[{showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+  var widths=[16,19,66,15,15.5,40,15.4,16.2,10.8,14,10.2,10.8,12,12,12,12,16,16,12,12];
+  widths.forEach(function(w,i){ws.getColumn(i+1).width=w});
+  var thin={style:'thin'}, box={top:thin,left:thin,bottom:thin,right:thin};
+  function put(a,v,o){var c=ws.getCell(a);c.value=v;o=o||{};
+    c.font={name:o.font||'Arial',size:o.size||11,bold:o.bold!==false&&o.bold!==0,color:o.color?{argb:o.color}:undefined};
+    if(o.fill) c.fill={type:'pattern',pattern:'solid',fgColor:{argb:o.fill}};
+    if(o.border) c.border=box;
+    if(o.align||o.wrap) c.alignment={horizontal:o.align,vertical:o.valign||'middle',wrapText:!!o.wrap};
+    if(o.fmt) c.numFmt=o.fmt;
+    return c}
+
+  var first=25, last=first+res.rows.length-1, totalRow=last+1;
+  put('B1','WORLD VISION DEVELOPMENT FOUNDATION, INC.',{size:16});
+  put('K1','PRINTING LOCATION'); put('M1',F.pl); put('N1',F.plf);
+  put('A3','Pay To'); put('B3',F.payTo);
+  ws.mergeCells('A4:B4'); put('A4','The amount of ',{size:11});
+  put('C4',{formula:'J'+totalRow,result:res.total},{font:'Calibri',size:12,fmt:'#,##0.00',align:'left'});
+  put('D4',{formula:'J'+totalRow,result:res.total},{font:'Calibri',size:12,fmt:'#,##0.00',align:'left'});
+  put('L4',F.t1); put('M4','Split Billing T1');
+  put('A5','For/Description '); put('B5',F.desc); put('L5',F.t0); put('M5','Split Billing T0/PRINTING LOCATION');
+  put('B6',F.ref,{wrap:true}); put('C6','KINDLY REFER TO THE TABLE FOR CORRECT ACCOUNT CODE AND T2:',{color:'FFFF0000'});
+  put('A7','Instruction: ');
+  ws.mergeCells('N7:O7'); put('N7','Account Codes:',{font:'Calibri',border:true,align:'center'});
+  put('Q7','Charged to Support (Account Code)',{font:'Calibri',fill:'FFFFCC99',border:true,align:'center',wrap:true});
+  put('R7','Charged to Project (T2)',{font:'Calibri',fill:'FFFFFF99',border:true,align:'center',wrap:true});
+  ws.getRow(7).height=32;
+  INSTRUCTIONS.forEach(function(t,i){put('B'+(8+i),t,{bold:true})});
+  REF_TABLE.forEach(function(r,i){var n=8+i;
+    ws.mergeCells('N'+n+':P'+n);
+    put('N'+n,r[0],{font:'Calibri',bold:false,border:true,align:'left',wrap:true});
+    put('Q'+n,r[1],{font:'Calibri',bold:false,fill:'FFFFCC99',border:true});
+    put('R'+n,r[2],{font:'Calibri',bold:false,fill:'FFFFFF99',border:true});
+  });
+  put('A13','Sample Coding:');
+  var sh=['Required Coding if Charged to:','Project Number / Account Code','Description','Base Amount'];
+  sh.forEach(function(t,i){put(String.fromCharCode(65+i)+'14',t,{size:10,color:'FFFFFFFF',fill:'FFFF6600',border:true,align:i?'center':'left',wrap:true})});
+  ws.getRow(14).height=30;
+  SAMPLES.forEach(function(s,i){var n=15+i;
+    put('A'+n,s[0],{font:'Calibri',border:true});
+    put('B'+n,s[1],{font:'Calibri',bold:false,border:true});
+    put('C'+n,s[0]==='GN'?'GIFT NOTIFICATION FOR REGISTERED CHILDRN':'INVOICE#12345 DAY OF PRAYER SUPPLIES',{font:'Calibri',bold:false,border:true});
+    put('D'+n,null,{border:true});
+  });
+  put('B21','Prepared by / Date: '+(F.prep||''));
+  put('B22','Checked by / Date: '+[F.chk,F.chkd].filter(Boolean).join(' '));
+
+  var heads=['%','Project Number / Account Code','Description','SOA','VR','Purpose','Date','Exp','Currency Code','Transaction Amount',
+    'Location\n\n\nT0','Department\n\n\nT1','Project Expense\n\nT2','Employee #\n\nT3','Funding Source\n\nT4','Designation Code\n\nT5','Logframe\n\n\nT6','Program Category\n\nT7','Motiv Code\n\nT8','Allocation Type \n\nT9'];
+  heads.forEach(function(t,i){
+    var c=ws.getCell(24,i+1);c.value=t;c.font={name:'Arial',size:10,bold:true};
+    c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFCC00'}};c.border=box;
+    c.alignment={horizontal:i===2?'left':'center',vertical:'middle',wrapText:true};
+  });
+  ws.getRow(24).height=70;
+  var RED='FFFBE5E3';
+  res.rows.forEach(function(r,i){
+    var n=first+i, row=ws.getRow(n);
+    var vals=[r.pct,r.acct,null,r.soa,r.vr,r.purpose,r.dateISO?isoToDateUTC(r.dateISO):null,r.exp,'PHP',r.amt].concat(r.t);
+    vals.forEach(function(v,ci){
+      var c=row.getCell(ci+1);
+      if(ci===2) c.value={formula:'D'+n+'&" "&E'+n+'&" "&F'+n+'&" "&H'+n,result:descOf(r)};
+      else c.value=(v===''?null:v);
+      c.font={name:ci===2?'Calibri':'Arial',size:11,bold:ci===8};
+      c.border=box;
+      c.alignment={horizontal:ci===2||ci===5?'left':(ci===9?'right':'center'),vertical:'middle',wrapText:ci===2||ci===5};
+      if(ci===6) c.numFmt='m/d/yyyy';
+      if(ci===9) c.numFmt='#,##0.00';
+      if(r.flag==='nomatch'&&ci>=10) c.fill={type:'pattern',pattern:'solid',fgColor:{argb:RED}};
+    });
+  });
+  var tr=ws.getRow(totalRow), tc=tr.getCell(10);
+  tc.value={formula:'SUM(J'+first+':J'+last+')',result:res.total};
+  tc.font={name:'Arial',size:11,bold:true};tc.numFmt='#,##0.00';tc.border=box;
+  tc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}};tc.alignment={horizontal:'right'};
+  ws.pageSetup.printArea='A1:T'+totalRow;
+  ws.views=[{showGridLines:false,state:'frozen',ySplit:24,xSplit:0}];
+  return wb.xlsx.writeBuffer();
+}
+function baseName(){
+  var m=(S.form.descMonth||'').replace(/\s+/g,'');
+  return 'PRF_SOA-'+String(S.form.soa||'').replace(/[^\w\-]+/g,'')+(m?'_'+m:'');
+}
+function save(blob,name){
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);
+}
+function tableRows(){
+  var head=['%','Project Number / Account Code','Description','SOA','VR','Purpose','Date','Exp','Currency Code','Transaction Amount','T0','T1','T2','T3','T4','T5','T6','T7','T8','T9'];
+  var rows=S.result.rows.map(function(r){return [r.pct,r.acct,descOf(r),r.soa,r.vr,r.purpose,r.dateISO?isoToUS(r.dateISO):'',r.exp,'PHP',r.amt.toFixed(2)].concat(r.t)});
+  return {head:head,rows:rows};
+}
+
+/* ---------- inputs ---------- */
+var FIELDS={payTo:'f-payTo',desc:'f-desc',soa:'f-soa',ref:'f-ref',t1:'f-t1',t0:'f-t0',pl:'f-pl',plf:'f-plf',prep:'f-prep',chk:'f-chk',chkd:'f-chkd'};
+function fillForm(){
+  Object.keys(FIELDS).forEach(function(k){$(FIELDS[k]).value=S.form[k]==null?'':S.form[k]});
+  renderRules();
+}
+function readForm(){
+  Object.keys(FIELDS).forEach(function(k){S.form[k]=$(FIELDS[k]).value});
+  S.form.keepZero=$('o-zero').checked;
+}
+function renderRules(){
+  var h='<tr><th>Expense</th><th>Cost centre account</th><th>Project T2</th><th>T5</th></tr>';
+  EXPENSES.forEach(function(e){var r=S.rules[e.label];
+    h+='<tr><td>'+e.label+'</td><td><input data-r="'+e.label+'|cc" value="'+esc(r.cc)+'"></td><td><input data-r="'+e.label+'|t2" value="'+esc(r.t2)+'"></td><td><input data-r="'+e.label+'|t5" value="'+esc(r.t5)+'"></td></tr>'});
+  $('rulesTbl').innerHTML=h;
+}
+function setDefaultsFromFiles(){
+  var m=S.soa.meta, t=(S.tpl&&S.tpl.header)||{};
+  var month='';
+  if(m.periodEnd){var p=m.periodEnd.split('-');month=MONTH_FULL[+p[1]-1]+' '+p[0]}
+  S.form.descMonth=month;
+  S.form.payTo=m.vendor||t.payTo||'';
+  S.form.desc=month?'Payment for Van Rental    '+month:(t.desc||'');
+  S.form.soa=(m.soaNo||'').replace(/\./g,'-');
+  S.form.ref=t.ref||'';
+  S.form.t1=t.t1||'C0501'; S.form.t0=t.t0||'A';
+  S.form.pl=t.pl||'PPH_A'; S.form.plf=t.plf||'NO';
+  S.form.prep=''; S.form.chk=t.chk||''; S.form.chkd=todayUS();
+  S.form.keepZero=true;
+  if(S.tpl&&S.tpl.rules) S.rules=JSON.parse(JSON.stringify(S.tpl.rules));
+  else S.rules=JSON.parse(JSON.stringify(DEFAULT_RULES));
+}
+
+/* ---------- file handling ---------- */
+var KIND_ID={soa:'soa',chg:'chg',tpl:'tpl'};
+function classify(f){
+  var n=f.name.toLowerCase();
+  if(/\.pdf$/.test(n)) return 'soa';
+  if(/charging|code/.test(n)) return 'chg';
+  if(/prf|template/.test(n)) return 'tpl';
+  if(/\.xls$/.test(n)) return 'tpl';
+  if(/\.(xlsx|csv)$/.test(n)) return 'chg';
+  return null;
+}
+function setBox(kind,state,text){
+  var el=$('dz-'+kind);el.classList.remove('has','busy','bad');if(state) el.classList.add(state);
+  $('fn-'+kind).textContent=text;
+}
+async function accept(files){
+  var arr=Array.prototype.slice.call(files);
+  arr.forEach(function(f){var k=classify(f);if(k) S.files[k]=f});
+  await processAll();
+}
+var lastKey={};
+async function processAll(){
+  try{
+    var F=S.files, changed=false;
+    if(F.soa&&lastKey.soa!==key(F.soa)){
+      setBox('soa','busy',F.soa.name+' (reading…)');status('Reading the SOA…');
+      try{S.soa=await parseSOA(await F.soa.arrayBuffer());lastKey.soa=key(F.soa);changed=true;
+        setBox('soa','has',F.soa.name+' · '+S.soa.lines.length+' trips');
+      }catch(e){S.soa=null;setBox('soa','bad',F.soa.name+' · '+e.message);throw e}
+    }
+    if(F.chg&&lastKey.chg!==key(F.chg)){
+      setBox('chg','busy',F.chg.name+' (reading…)');status('Reading the charging codes…');
+      try{S.chg=parseCharging(await F.chg.arrayBuffer());lastKey.chg=key(F.chg);changed=true;
+        setBox('chg','has',F.chg.name+' · '+S.chg.rows.length+' rows');
+      }catch(e){S.chg=null;setBox('chg','bad',F.chg.name+' · '+e.message);throw e}
+    }
+    if(F.tpl&&lastKey.tpl!==key(F.tpl)){
+      setBox('tpl','busy',F.tpl.name+' (reading, please wait…)');status('Reading the template. A large file can take 10 to 30 seconds…');
+      await new Promise(function(r){setTimeout(r,30)});
+      try{S.tpl=parseTemplate(await F.tpl.arrayBuffer());lastKey.tpl=key(F.tpl);changed=true;
+        setBox('tpl','has',F.tpl.name);
+      }catch(e){S.tpl=null;lastKey.tpl=key(F.tpl);setBox('tpl','bad',F.tpl.name+' · could not read it, using defaults');changed=true}
+    }
+    if(!S.soa||!S.chg){status(S.soa||S.chg?'Waiting for the other file(s)…':'');return}
+    if(changed){setDefaultsFromFiles();fillForm()}
+    var extra=[];
+    if(S.tpl&&S.tpl.note) extra.push(S.tpl.note);
+    if(!F.tpl) extra.push('No template uploaded, so built-in defaults are used for the header and coding rules.');
+    var fm=/(\d{4})[-_.](\d{1,3})/.exec(F.soa.name), mine=String(S.form.soa||'');
+    if(fm&&(fm[1]+'-'+fm[2])!==mine) extra.push('The PDF says SOA# '+S.soa.meta.soaNo+' but the file name says '+fm[1]+'-'+fm[2]+'. The SOA number from the PDF is used. Change it in step 2 if it is wrong.');
+    status(extra.join(' '));
+    $('formCard').classList.remove('hidden');
+    readForm();render();
+  }catch(e){
+    status(e.message||String(e),'err');
+    console.error(e);
+  }
+}
+function key(f){return f.name+'|'+f.size+'|'+f.lastModified}
+
+/* ---------- wire up ---------- */
+['soa','chg','tpl'].forEach(function(k){
+  var dz=$('dz-'+k), inp=dz.querySelector('input');
+  inp.addEventListener('change',function(){if(inp.files.length){
+    if(inp.files.length===1){S.files[k]=inp.files[0];processAll()} // one file picked for this box
+    else accept(inp.files);                                         // several at once: sort by name/type
+  }});
+  ['dragenter','dragover'].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.add('over')})});
+  ['dragleave','drop'].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.remove('over')})});
+  dz.addEventListener('drop',function(e){
+    var fs=e.dataTransfer.files; if(!fs||!fs.length) return;
+    if(fs.length===1){S.files[k]=fs[0];processAll()} else accept(fs);
+  });
+});
+var timer=null;
+function onEdit(){clearTimeout(timer);timer=setTimeout(function(){if(S.soa&&S.chg){readForm();render()}},200)}
+Object.keys(FIELDS).forEach(function(k){$(FIELDS[k]).addEventListener('input',onEdit)});
+$('o-zero').addEventListener('change',onEdit);
+$('rulesTbl').addEventListener('input',function(e){
+  var d=e.target.getAttribute('data-r');if(!d) return;
+  var p=d.split('|');S.rules[p[0]][p[1]]=e.target.value.trim();onEdit();
+});
+$('dlBtn').addEventListener('click',async function(){
+  var b=this;b.disabled=true;
+  try{var buf=await buildWorkbook();
+    save(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),baseName()+'.xlsx');
+  }catch(e){status(e.message,'err');console.error(e)}
+  b.disabled=false;
+});
+$('copyBtn').addEventListener('click',async function(){
+  var t=tableRows(), txt=t.rows.map(function(r){return r.join('\t')}).join('\n');
+  try{await navigator.clipboard.writeText(txt);status('Copied '+t.rows.length+' rows. Paste them into the PRF sheet starting at the % column.')}
+  catch(e){status('Your browser blocked copying. Use the download buttons instead.','err')}
+});
+$('csvBtn').addEventListener('click',function(){
+  var t=tableRows();
+  function q(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}
+  var csv=[t.head].concat(t.rows).map(function(r){return r.map(q).join(',')}).join('\r\n');
+  save(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}),baseName()+'.csv');
+});
+$('themeBtn').addEventListener('click',function(){
+  var r=document.documentElement, cur=r.getAttribute('data-theme');
+  var dark=cur?cur==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;
+  r.setAttribute('data-theme',dark?'light':'dark');
+});
+window.__PRF=S; // handy for debugging in the console
+})();
+</script>
+</body>
+</html>
