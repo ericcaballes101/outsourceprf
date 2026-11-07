@@ -131,6 +131,10 @@ button.lnk.danger{color:var(--err)}
 .ebar .track{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
 .ebar .fill{height:100%;background:var(--s1);border-radius:0 4px 4px 0}
 .ebar .v{text-align:right;font-variant-numeric:tabular-nums}
+.dupbox{border:1.5px solid var(--warn);background:var(--warn-soft);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:14px}
+.dupbox .notes li.warn{background:var(--surface)}
+.tbl tr.dup td{background:var(--warn-soft)}
+.tbl tr.dup td:first-child{box-shadow:inset 4px 0 0 var(--warn)}
 .legend{display:flex;gap:16px;font-size:13px;color:var(--muted);margin:4px 0 6px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 svg.chart{width:100%;height:auto;display:block}
@@ -914,7 +918,8 @@ $('dlBtn').addEventListener('click',async function(){
   try{var buf=await buildWorkbook();
     save(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),baseName()+'.xlsx');
     var sv=saveCurrentToReport();
-    status('Downloaded. SOA '+sv.rec.soaNo+' was also '+(sv.existed?'updated in':'added to')+' the report.');
+    var dn=dupCountFor(sv.rec.id);
+    status('Downloaded. SOA '+sv.rec.soaNo+' was also '+(sv.existed?'updated in':'added to')+' the report.'+(dn?' ⚠ '+dn+' possible duplicate charge(s) found. Open the Report tab to see them.':''),dn?'err':'');
   }catch(e){status(e.message,'err');console.error(e)}
   b.disabled=false;
 });
@@ -1004,6 +1009,70 @@ function agg(list){
   });
   return a;
 }
+
+/* ---------- report: duplicate charging ---------- */
+var DUP={rec:{},trip:{},prf:{},groups:[]};
+function soaBtn(rec,n){return '<button class="lnk" data-act="open" data-id="'+esc(rec.id)+'">SOA '+esc(rec.soaNo)+'</button>'+(n>1?' ('+n+' rows)':'')}
+function findDups(){
+  var all=sortRecs(allRecs()), out={rec:{},trip:{},prf:{},groups:[]};
+  function mark(items,kind){items.forEach(function(it){out[kind][it.rec.id+'#'+it.i]=true});
+    var seen={};items.forEach(function(it){if(!seen[it.rec.id]){seen[it.rec.id]=1;out.rec[it.rec.id]=(out.rec[it.rec.id]||0)+1}})}
+  function refs(items){
+    var by={},order=[];items.forEach(function(it){if(!by[it.rec.id]){by[it.rec.id]={rec:it.rec,n:0};order.push(it.rec.id)}by[it.rec.id].n++});
+    return {html:order.map(function(id){return soaBtn(by[id].rec,by[id].n)}).join(', '),text:order.map(function(id){return 'SOA '+by[id].rec.soaNo+(by[id].n>1?' ('+by[id].n+' rows)':'')}).join(', ')};
+  }
+  var strict={}, vd={};
+  all.forEach(function(r){r.trips.forEach(function(t,i){
+    var id=t.vr||('PLATE '+t.plate), it={rec:r,i:i,t:t};
+    (strict[[id,t.date,t.acct||''].join('|').toUpperCase()]=strict[[id,t.date,t.acct||''].join('|').toUpperCase()]||[]).push(it);
+    (vd[[id,t.date].join('|').toUpperCase()]=vd[[id,t.date].join('|').toUpperCase()]||[]).push(it);
+  })});
+  var tripKeys={};
+  Object.keys(strict).forEach(function(k){
+    var g=strict[k];if(g.length<2) return;
+    var t=g[0].t, id=t.vr||('Plate '+t.plate), rf=refs(g), amt=r2(g.reduce(function(a,x){return a+x.t.total},0));
+    mark(g,'trip');tripKeys[[t.vr||('PLATE '+t.plate),t.date].join('|').toUpperCase()]=1;
+    out.groups.push({type:'Trip charged more than once',label:id,date:t.date,acct:t.acct||'',n:g.length,soas:rf.text,amount:amt,recs:g.map(function(x){return x.rec.id}),
+      msg:'<b>'+esc(id)+'</b> on '+fmtDay(t.date)+(t.acct?' charged to <b>'+esc(t.acct)+'</b>':'')+' appears <b>'+g.length+' times</b> in '+rf.html+'. Together '+money(amt)+'.'});
+  });
+  Object.keys(vd).forEach(function(k){
+    var g=vd[k], ids={};g.forEach(function(x){ids[x.rec.id]=1});
+    if(Object.keys(ids).length<2) return;
+    if(!g.some(function(x){return !x.t.acct})) return;               // layouts with account codes are covered above
+    if(g.every(function(x){return out.trip[x.rec.id+'#'+x.i]})) return;
+    var t=g[0].t, id=t.vr||('Plate '+t.plate), rf=refs(g), amt=r2(g.reduce(function(a,x){return a+x.t.total},0));
+    mark(g,'trip');
+    out.groups.push({type:'Trip in more than one SOA',label:id,date:t.date,acct:'',n:g.length,soas:rf.text,amount:amt,recs:g.map(function(x){return x.rec.id}),
+      msg:'<b>'+esc(id)+'</b> on '+fmtDay(t.date)+' appears in more than one SOA ('+rf.html+'). Together '+money(amt)+'. One of the SOAs has no account code, so check it by hand.'});
+  });
+  var lines={};
+  all.forEach(function(r){if(!r.prf) return;r.prf.rows.forEach(function(x,i){
+    if(!x[6]||!x[2]) return;
+    var k=[x[2],x[4],x[1],x[5]].concat(x.slice(7)).join('|').toUpperCase();
+    (lines[k]=lines[k]||[]).push({rec:r,i:i,x:x});
+  })});
+  Object.keys(lines).forEach(function(k){
+    var g=lines[k];if(g.length<2) return;
+    var x=g[0].x;
+    mark(g,'prf');                                                          // always highlight the repeated lines
+    if(tripKeys[[x[2],x[4]].join('|').toUpperCase()]) return;               // already reported as a duplicate trip
+    var rf=refs(g);
+    out.groups.push({type:'PRF line repeated',label:x[2],date:x[4],acct:String(x[1]),n:g.length,soas:rf.text,amount:r2(g.reduce(function(a,y){return a+y.x[6]},0)),recs:g.map(function(y){return y.rec.id}),
+      msg:'PRF line <b>'+esc(x[2])+'</b> · '+esc(x[5])+' · '+fmtDay(x[4])+' · account <b>'+esc(x[1])+'</b> is repeated <b>'+g.length+' times</b> with the same coding in '+rf.html+' ('+money(x[6])+' each).'});
+  });
+  return out;
+}
+function repBanner(list){
+  var ids={};list.forEach(function(r){ids[r.id]=1});
+  var gs=DUP.groups.filter(function(g){return g.recs.some(function(id){return ids[id]})});
+  if(!gs.length) return '';
+  return '<div class="dupbox" role="alert"><b>⚠ Possible duplicate charging: '+gs.length+' found.</b> The same trip or charging line appears more than once, so it may be charged twice. Check each one before paying. The affected rows are highlighted below.'+
+    '<ul class="notes" style="margin:10px 0 0">'+gs.slice(0,5).map(li).join('')+'</ul>'+
+    (gs.length>5?'<details style="margin-top:8px"><summary>Show the other '+(gs.length-5)+'</summary><ul class="notes" style="margin:8px 0 0">'+gs.slice(5).map(li).join('')+'</ul></details>':'')+'</div>';
+  function li(g){return '<li class="warn"><span class="tag">Duplicate</span><span>'+g.msg+'</span></li>'}
+}
+function dupBadge(id){return DUP.rec[id]?' <span class="badge bad">⚠ Duplicate</span>':''}
+function dupCountFor(id){return findDups().rec[id]||0}
 function reportTitle(){
   if(R.view==='year') return 'Annual report '+R.year;
   if(R.view==='soa'){var r=DB.records[R.soa];return r?'SOA '+r.soaNo:'SOA report'}
@@ -1045,7 +1114,7 @@ function soaTable(list){
   if(!list.length) return '';
   var h='<div class="tw"><table class="tbl"><thead><tr><th>SOA</th><th>Vendor</th><th>Month</th><th class="num">Trips</th><th class="num">SOA total</th><th>Status</th><th class="num">PRF total</th><th>PRF date</th><th></th></tr></thead><tbody>';
   sortRecs(list).forEach(function(r){
-    h+='<tr><td><b>'+esc(r.soaNo)+'</b></td><td>'+esc(r.vendor)+'</td><td>'+esc(monthLabel(r.month))+'</td><td class="num">'+r.trips.length+'</td><td class="num">'+money(r.soaTotal)+'</td><td>'+statusBadge(r)+'</td><td class="num">'+(r.prf?money(r.prf.total):'')+'</td><td>'+(r.prf?fmtStamp(r.prf.createdAt):'')+'</td>'+
+    h+='<tr class="'+(DUP.rec[r.id]?'dup':'')+'"><td><b>'+esc(r.soaNo)+'</b></td><td>'+esc(r.vendor)+'</td><td>'+esc(monthLabel(r.month))+'</td><td class="num">'+r.trips.length+'</td><td class="num">'+money(r.soaTotal)+'</td><td>'+statusBadge(r)+dupBadge(r.id)+'</td><td class="num">'+(r.prf?money(r.prf.total):'')+'</td><td>'+(r.prf?fmtStamp(r.prf.createdAt):'')+'</td>'+
        '<td style="white-space:nowrap"><button class="lnk" data-act="open" data-id="'+esc(r.id)+'">Open</button><button class="lnk danger" data-act="del" data-id="'+esc(r.id)+'">Remove</button></td></tr>';
   });
   return h+'</tbody></table></div>';
@@ -1071,18 +1140,18 @@ function yearChart(months){
     '<svg class="chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="SOA total and PRF total per month in '+R.year+'. The table below has the same figures.">'+g+'</svg>';
 }
 function monthTable(rows){
-  var t={soas:0,prfs:0,trips:0,soa:0,prf:0,pend:0};
-  var h='<div class="tw"><table class="tbl"><thead><tr><th>Month</th><th class="num">SOAs</th><th class="num">PRFs created</th><th class="num">Trips</th><th class="num">SOA total</th><th class="num">PRF total</th><th class="num">Without PRF</th></tr></thead><tbody>';
+  var t={soas:0,prfs:0,trips:0,soa:0,prf:0,pend:0,dups:0};
+  var h='<div class="tw"><table class="tbl"><thead><tr><th>Month</th><th class="num">SOAs</th><th class="num">PRFs created</th><th class="num">Trips</th><th class="num">SOA total</th><th class="num">PRF total</th><th class="num">Without PRF</th><th class="num">Duplicates</th></tr></thead><tbody>';
   rows.forEach(function(m,i){
-    t.soas+=m.soas;t.prfs+=m.prfs;t.trips+=m.trips;t.soa=r2(t.soa+m.soa);t.prf=r2(t.prf+m.prf);t.pend+=m.pending;
-    h+='<tr class="'+(m.soas?'':'muted')+'"><td>'+(m.soas?'<button class="lnk" data-act="month" data-m="'+pad(i+1)+'">'+MONTH_FULL[i]+'</button>':MONTH_FULL[i])+'</td><td class="num">'+m.soas+'</td><td class="num">'+m.prfs+'</td><td class="num">'+m.trips+'</td><td class="num">'+(m.soas?money(m.soa):'')+'</td><td class="num">'+(m.prfs?money(m.prf):'')+'</td><td class="num">'+(m.pending||'')+'</td></tr>';
+    t.soas+=m.soas;t.prfs+=m.prfs;t.trips+=m.trips;t.soa=r2(t.soa+m.soa);t.prf=r2(t.prf+m.prf);t.pend+=m.pending;t.dups+=m.dups;
+    h+='<tr class="'+(m.soas?'':'muted')+'"><td>'+(m.soas?'<button class="lnk" data-act="month" data-m="'+pad(i+1)+'">'+MONTH_FULL[i]+'</button>':MONTH_FULL[i])+'</td><td class="num">'+m.soas+'</td><td class="num">'+m.prfs+'</td><td class="num">'+m.trips+'</td><td class="num">'+(m.soas?money(m.soa):'')+'</td><td class="num">'+(m.prfs?money(m.prf):'')+'</td><td class="num">'+(m.pending||'')+'</td><td class="num">'+(m.dups?'<span class="badge bad">⚠ '+m.dups+'</span>':'')+'</td></tr>';
   });
-  return h+'</tbody><tfoot><tr><td>Year</td><td class="num">'+t.soas+'</td><td class="num">'+t.prfs+'</td><td class="num">'+t.trips+'</td><td class="num">'+money(t.soa)+'</td><td class="num">'+money(t.prf)+'</td><td class="num">'+t.pend+'</td></tr></tfoot></table></div>';
+  return h+'</tbody><tfoot><tr><td>Year</td><td class="num">'+t.soas+'</td><td class="num">'+t.prfs+'</td><td class="num">'+t.trips+'</td><td class="num">'+money(t.soa)+'</td><td class="num">'+money(t.prf)+'</td><td class="num">'+t.pend+'</td><td class="num">'+t.dups+'</td></tr></tfoot></table></div>';
 }
 function monthRows(list){
   return MONTH_FULL.map(function(_,i){
     var ml=list.filter(function(r){return r.month.slice(5,7)===pad(i+1)}), a=agg(ml);
-    return {label:MONTHS[i],soas:a.soas,prfs:a.prfs,trips:a.trips,soa:a.soaTotal,prf:a.prfTotal,pending:a.pending};
+    return {label:MONTHS[i],soas:a.soas,prfs:a.prfs,trips:a.trips,soa:a.soaTotal,prf:a.prfTotal,pending:a.pending,dups:DUP.groups.filter(function(g){return g.recs.some(function(id){return ml.some(function(r){return r.id===id})})}).length};
   });
 }
 function soaDetail(r){
@@ -1090,12 +1159,12 @@ function soaDetail(r){
   var h='<div class="sohead"><h3>SOA '+esc(r.soaNo)+'</h3><span>'+esc(r.vendor)+'</span>'+statusBadge(r)+'<span class="hint" style="margin:0">'+esc(monthLabel(r.month))+(r.period?' · '+esc(r.period):'')+' · file '+esc(r.file)+'</span><span class="grow"></span><button class="lnk danger" data-act="del" data-id="'+esc(r.id)+'">Remove from report</button></div>';
   h+=repTiles(a);
   h+='<h3 class="rep-h">Trips on the SOA</h3><div class="tw"><table class="tbl"><thead><tr><th>Date</th><th>VR</th><th>Plate</th><th>Destination</th>'+EXP_KEYS.map(function(k){return '<th class="num">'+EXP_LABEL[k]+'</th>'}).join('')+'<th class="num">Total</th></tr></thead><tbody>';
-  r.trips.forEach(function(t){h+='<tr><td>'+fmtDay(t.date)+'</td><td>'+esc(t.vr||'—')+'</td><td>'+esc(t.plate)+'</td><td>'+esc(t.dest)+'</td>'+EXP_KEYS.map(function(k){return '<td class="num">'+(t[k]?money(t[k]):'')+'</td>'}).join('')+'<td class="num">'+money(t.total)+'</td></tr>'});
+  r.trips.forEach(function(t,ti){var d=DUP.trip[r.id+'#'+ti];h+='<tr class="'+(d?'dup':'')+'"><td>'+fmtDay(t.date)+(d?' <span class="badge bad">⚠ Duplicate</span>':'')+'</td><td>'+esc(t.vr||'—')+'</td><td>'+esc(t.plate)+'</td><td>'+esc(t.dest)+'</td>'+EXP_KEYS.map(function(k){return '<td class="num">'+(t[k]?money(t[k]):'')+'</td>'}).join('')+'<td class="num">'+money(t.total)+'</td></tr>'});
   h+='</tbody><tfoot><tr><td colspan="4">Total</td>'+EXP_KEYS.map(function(k){return '<td class="num">'+money(r.totals[k])+'</td>'}).join('')+'<td class="num">'+money(r.soaTotal)+'</td></tr></tfoot></table></div>';
   h+='<h3 class="rep-h">PRF by account code</h3>'+acctTable(a);
   if(r.prf){
     h+='<h3 class="rep-h">PRF lines ('+r.prf.lines+')</h3><details><summary>Show all lines</summary><div class="tw" style="max-height:60vh;margin-top:8px"><table class="tbl"><thead><tr><th>%</th><th>Account</th><th>VR</th><th>Purpose</th><th>Date</th><th>Exp</th><th class="num">Amount</th>'+[0,1,2,3,4,5,6,7,8,9].map(function(i){return '<th>T'+i+'</th>'}).join('')+'</tr></thead><tbody>';
-    r.prf.rows.forEach(function(x){h+='<tr class="'+(x[6]===0?'muted':'')+'"><td>'+x[0]+'</td><td>'+esc(x[1])+'</td><td>'+esc(x[2])+'</td><td>'+esc(x[3])+'</td><td>'+fmtDay(x[4])+'</td><td>'+esc(x[5])+'</td><td class="num">'+money(x[6])+'</td>'+x.slice(7).map(function(v){return '<td>'+esc(v)+'</td>'}).join('')+'</tr>'});
+    r.prf.rows.forEach(function(x,xi){var d=DUP.prf[r.id+'#'+xi];h+='<tr class="'+(d?'dup':(x[6]===0?'muted':''))+'"><td>'+x[0]+'</td><td>'+esc(x[1])+(d?' <span class="badge bad">⚠ Duplicate</span>':'')+'</td><td>'+esc(x[2])+'</td><td>'+esc(x[3])+'</td><td>'+fmtDay(x[4])+'</td><td>'+esc(x[5])+'</td><td class="num">'+money(x[6])+'</td>'+x.slice(7).map(function(v){return '<td>'+esc(v)+'</td>'}).join('')+'</tr>'});
     h+='</tbody></table></div></details><p class="hint" style="margin-top:8px">PRF created '+fmtStamp(r.prf.createdAt)+(r.prf.payTo?' · pay to '+esc(r.prf.payTo):'')+'</p>';
   } else h+='<p class="hint">The PRF for this SOA has not been created yet. Open the PRF Generator, upload this SOA with the charging code file, and download the PRF.</p>';
   return h;
@@ -1115,6 +1184,7 @@ function fillSelects(){
 function renderReport(){
   var body=$('repBody');
   var all=allRecs();
+  DUP=findDups();
   $('repXlsBtn').disabled=!all.length;
   if(!all.length){
     ['r-year','r-month','r-soa'].forEach(function(i){$(i).innerHTML=''});
@@ -1132,7 +1202,7 @@ function renderReport(){
     } else h+='<h3 class="rep-h">SOAs in '+esc(monthLabel(R.year+'-'+R.month))+'</h3>'+soaTable(list);
     h+='<h3 class="rep-h">SOA amounts by expense</h3>'+expBars(a)+'<h3 class="rep-h">Created PRFs by account code</h3>'+acctTable(a);
   }
-  body.innerHTML=h;
+  body.innerHTML=repBanner(list)+h;
 }
 
 /* ---------- report: export ---------- */
@@ -1151,7 +1221,8 @@ async function exportReport(){
   ws.getColumn(1).width=34;[2,3,4,5,6,7].forEach(function(i){ws.getColumn(i).width=18});
   ws.getCell('A1').value=reportTitle();ws.getCell('A1').font={bold:true,size:14};
   ws.getCell('A2').value='Created '+new Date().toLocaleDateString('en-US')+' · amounts in PHP';
-  var kv=[['SOAs',a.soas],['Trips',a.trips],['PRFs created',a.prfs],['SOA total',a.soaTotal],['PRF total (created PRFs)',a.prfTotal],['SOAs without a PRF',a.pending],['SOA amount without a PRF',a.pendingAmt]];
+  var dg=DUP.groups.filter(function(g){return g.recs.some(function(id){return list.some(function(r){return r.id===id})})});
+  var kv=[['SOAs',a.soas],['Trips',a.trips],['PRFs created',a.prfs],['SOA total',a.soaTotal],['PRF total (created PRFs)',a.prfTotal],['SOAs without a PRF',a.pending],['SOA amount without a PRF',a.pendingAmt],['Possible duplicate charges',dg.length]];
   var row=table(ws,4,['Measure','Value'],kv,1);
   row=table(ws,row+2,['SOA amounts by expense','Amount'],EXP_KEYS.map(function(k){return [EXP_LABEL[k],a.exp[k]]}),1);
   if(R.view==='year'){
@@ -1165,6 +1236,12 @@ async function exportReport(){
   table(w2,1,['SOA','Vendor','Month','Period','Trips','Basic Charge','Overtime','Meals','Toll Fee','Parking','Fuel','SOA total','PRF created','PRF date','PRF total','PRF lines','Difference'],
     list.map(function(r){return [r.soaNo,r.vendor,monthLabel(r.month),r.period||(r.soaDate?fmtDay(r.soaDate):''),r.trips.length,r.totals.basic,r.totals.ot,r.totals.meals,r.totals.toll,r.totals.parking,r.totals.fuel,r.soaTotal,r.prf?'Yes':'No',r.prf?fmtStamp(r.prf.createdAt):'',r.prf?r.prf.total:'',r.prf?r.prf.lines:'',r.prf?r2(r.prf.total-r.soaTotal):'']}),5);
   w2.views=[{state:'frozen',ySplit:1}];
+  if(dg.length){
+    var w4=wb.addWorksheet('Duplicates');
+    [28,18,12,12,8,40,16].forEach(function(w,i){w4.getColumn(i+1).width=w});
+    table(w4,1,['What','VR / plate','Date','Account','Times','Found in','Amount together'],dg.map(function(g){return [g.type,g.label,fmtDay(g.date),g.acct,g.n,g.soas,g.amount]}),6);
+    w4.views=[{state:'frozen',ySplit:1}];
+  }
   var withPrf=list.filter(function(r){return r.prf});
   if(withPrf.length){
     var w3=wb.addWorksheet('PRF lines');
@@ -1190,7 +1267,8 @@ async function addSoaFiles(files){
       var soa=await parseSOA(await f.arrayBuffer());
       var rec=makeRecord(soa,f.name), existed=upsert(rec);
       R.view='month';R.year=rec.month.slice(0,4);R.month=rec.month.slice(5,7);R.monthTouched=true;
-      out.push('SOA '+rec.soaNo+' '+(existed?'updated':'added')+' ('+soa.lines.length+' trips, '+money(rec.soaTotal)+').'+(soa.problems.length?' '+soa.problems.length+' row(s) need checking: '+soa.problems.join(' '):''));
+      var dn=dupCountFor(rec.id);
+      out.push('SOA '+rec.soaNo+' '+(existed?'updated':'added')+' ('+soa.lines.length+' trips, '+money(rec.soaTotal)+').'+(dn?' ⚠ '+dn+' possible duplicate charge(s) found.':'')+(soa.problems.length?' '+soa.problems.length+' row(s) need checking: '+soa.problems.join(' '):''));
     }catch(e){out.push(f.name+': '+(e.message||e))}
   }
   st.textContent=out.join(' ');
@@ -1245,7 +1323,8 @@ $('clrBtn').addEventListener('click',function(){
 $('saveRepBtn').addEventListener('click',function(){
   if(!S.result) return;
   var r=saveCurrentToReport();
-  status('SOA '+r.rec.soaNo+' '+(r.existed?'updated in':'saved to')+' the report. Open the Report tab to see it.');
+  var dn=dupCountFor(r.rec.id);
+  status('SOA '+r.rec.soaNo+' '+(r.existed?'updated in':'saved to')+' the report.'+(dn?' ⚠ '+dn+' possible duplicate charge(s) found. Open the Report tab to see them.':' Open the Report tab to see it.'),dn?'err':'');
 });
 (function(){
   var tip=$('tip');
@@ -1261,7 +1340,7 @@ $('saveRepBtn').addEventListener('click',function(){
   document.addEventListener('scroll',hide,true);
 })();
 
-window.__PRF=S; window.__DB=function(){return DB}; // handy for debugging in the console
+window.__PRF=S; window.__DB=function(){return DB}; window.__renderReport=function(){renderReport()}; // handy for debugging in the console
 })();
 </script>
 </body>
